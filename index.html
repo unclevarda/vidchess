@@ -248,7 +248,8 @@
      ══════════════════════════════════════════ */
   .square-last-move {
     position: relative !important;
-    background: rgba(255, 255, 50, 0.2) !important;
+    background: rgba(155, 200, 50, 0.5) !important;
+    box-shadow: inset 0 0 0 2px rgba(155, 200, 50, 0.8);
   }
   .square-check {
     position: relative !important;
@@ -472,18 +473,39 @@ function generateRoomId() {
 
 function createGame() {
   myRoomId = generateRoomId();
-  peer = new Peer('cr-' + myRoomId);
+  // Use PeerJS with custom config for better reliability
+  peer = new Peer('cr-' + myRoomId, {
+    debug: 2,
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    }
+  });
 
-  peer.on('open', function() {
+  peer.on('open', function(id) {
+    console.log('Host Peer opened with ID:', id);
     document.getElementById('gameLinkArea').style.display = 'flex';
     const link = window.location.origin + window.location.pathname + '?room=' + myRoomId;
     document.getElementById('shareLink').value = link;
+    // Show waiting message
+    addChatMessage('system', 'Waiting for opponent to join...');
   });
 
   peer.on('connection', function(connection) {
     conn = connection;
     playerColor = 'w';
     setupConnection();
+  });
+
+  peer.on('disconnected', function() {
+    console.log('Peer disconnected, reconnecting...');
+    peer.reconnect();
+  });
+
+  peer.on('close', function() {
+    console.log('Peer connection closed');
   });
 
   // Register incoming call handler early so we never miss a video call
@@ -510,29 +532,113 @@ function createGame() {
 }
 
 function joinGame(room) {
-  peer = new Peer();
-
-  peer.on('open', function() {
-    conn = peer.connect('cr-' + room);
-    playerColor = 'b';
-    setupConnection();
+  // Use PeerJS with custom config for better reliability
+  peer = new Peer({
+    debug: 2,
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    }
   });
 
-  // Register incoming call handler early so we never miss a video call
+  peer.on('open', function(id) {
+    console.log('Joiner Peer opened with ID:', id);
+    attemptConnection(room);
+  });
+
   peer.on('call', function(incomingCall) {
+    console.log('Received incoming video call');
     if (localStream) {
       incomingCall.answer(localStream);
       incomingCall.on('stream', function(remoteStream) {
-        document.getElementById('remoteVideo').srcObject = remoteStream;
+        console.log('Received remote video stream');
+        var remoteVideo = document.getElementById('remoteVideo');
+        remoteVideo.srcObject = remoteStream;
+        // Explicitly play the remote video
+        remoteVideo.play().catch(e => console.log('Remote video play error:', e));
+      });
+      incomingCall.on('close', function() {
+        console.log('Video call closed');
       });
     } else {
+      console.log('No local stream, answering without video');
       incomingCall.answer();
     }
   });
 
+  peer.on('disconnected', function() {
+    console.log('Peer disconnected, reconnecting...');
+    peer.reconnect();
+  });
+
   peer.on('error', function(err) {
     console.error('Peer error:', err);
-    alert('Could not join game. Check the room code.');
+    if (err.type === 'peer-unavailable' && connectionRetries < maxRetries) {
+      connectionRetries++;
+      console.log('Retrying connection (' + connectionRetries + '/' + maxRetries + ')...');
+      setTimeout(function() { attemptConnection(room); }, 2000);
+    } else if (err.type === 'peer-unavailable') {
+      alert('Could not connect to host after multiple attempts. Make sure the host is still on the game page and try a new room.');
+    } else {
+      alert('Connection error: ' + err.message);
+    }
+  });
+}
+
+var connectionRetries = 0;
+var maxRetries = 5;
+var connectionTimeout = null;
+
+function attemptConnection(room) {
+  if (connectionRetries >= maxRetries) {
+    alert('Could not connect after ' + maxRetries + ' attempts. Make sure the host is still on the game page and try a new room.');
+    document.getElementById('joinBtn').disabled = false;
+    document.getElementById('joinBtn').textContent = 'Join Game';
+    return;
+  }
+
+  connectionRetries++;
+  console.log('Connection attempt ' + connectionRetries + ' of ' + maxRetries);
+
+  // Clear any existing timeout
+  if (connectionTimeout) clearTimeout(connectionTimeout);
+
+  // Try to connect
+  conn = peer.connect('cr-' + room, { 
+    reliable: true,
+    metadata: { joiner: true }
+  });
+  playerColor = 'b';
+
+  // Set timeout for connection
+  connectionTimeout = setTimeout(function() {
+    if (!conn.open) {
+      console.log('Connection timeout, retrying...');
+      if (conn) conn.close();
+      attemptConnection(room);
+    }
+  }, 5000);
+
+  conn.on('open', function() {
+    console.log('Connected to host!');
+    if (connectionTimeout) clearTimeout(connectionTimeout);
+    connectionRetries = 0;
+    setupConnection();
+  });
+
+  conn.on('error', function(err) {
+    console.error('Data connection error:', err);
+    if (connectionRetries < maxRetries) {
+      console.log('Retrying in 2 seconds...');
+      setTimeout(function() { attemptConnection(room); }, 2000);
+    }
+  });
+
+  conn.on('close', function() {
+    console.log('Connection closed by host');
+    if (connectionTimeout) clearTimeout(connectionTimeout);
   });
 }
 
@@ -629,6 +735,9 @@ function onDrop(source, target) {
   const move = game.move({ from: source, to: target, promotion: 'q' });
   if (move === null) return 'snapback';
 
+  // Clear previous highlights first
+  clearHighlights();
+  
   board.position(game.fen());
   lastMove = { from: source, to: target };
   addMoveToHistory(move);
@@ -867,9 +976,14 @@ function sendChat() {
 async function startCamera() {
   var localVideo = document.getElementById('localVideo');
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({ 
+      video: { width: 640, height: 480, facingMode: 'user' }, 
+      audio: true 
+    });
     localVideo.srcObject = localStream;
-    await localVideo.play();
+    // Explicitly play the video (required for some browsers)
+    await localVideo.play().catch(e => console.log('Video play error:', e));
+    console.log('Camera started successfully');
   } catch(err) {
     console.log('Camera not available:', err.message);
     // Only show chat message if game screen is visible
@@ -881,14 +995,23 @@ async function startCamera() {
 
 function setupVideoCall() {
   // Host (white) initiates the video call
-  // Note: incoming call handler is registered in createGame/joinGame to avoid missing early calls
   if (playerColor === 'w' && conn && conn.open && peer && localStream) {
+    console.log('Host initiating video call...');
     var call = peer.call(conn.peer, localStream);
     if (call) {
       call.on('stream', function(remoteStream) {
-        document.getElementById('remoteVideo').srcObject = remoteStream;
+        console.log('Host received remote video stream');
+        var remoteVideo = document.getElementById('remoteVideo');
+        remoteVideo.srcObject = remoteStream;
+        // Explicitly play the remote video
+        remoteVideo.play().catch(e => console.log('Remote video play error:', e));
+      });
+      call.on('close', function() {
+        console.log('Video call closed');
       });
     }
+  } else if (playerColor === 'b') {
+    console.log('Joiner waiting for video call from host...');
   }
 }
 </script>
