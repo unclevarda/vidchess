@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ChessRoulette — Play Chess, Meet Strangers</title>
+<title>VidChess — Chess Roulette with Video Chat</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- Stockfish.js for AI opponent -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js"></script>
 
 <style>
   :root {
@@ -79,21 +81,7 @@
   .btn-danger:hover { opacity: 0.85; }
   .btn-sm { padding: 8px 20px; font-size: 0.85rem; border-radius: 8px; }
 
-  /* ── Matchmaking ── */
-  #matchmaking {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.85); backdrop-filter: blur(10px);
-    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 100;
-  }
-  #matchmaking.active { display: flex; }
-  .spinner { width: 56px; height: 56px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  #matchmaking p { font-size: 1.1rem; color: var(--text-dim); }
-  #matchmaking .timer { font-size: 2rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
-
-  /* ══════════════════════════════════════════
-     GAME SCREEN — board + video side by side
-     ══════════════════════════════════════════ */
+  /* ── Game Screen ── */
   #game {
     flex-direction: column;
     height: calc(100vh - 44px);
@@ -135,7 +123,7 @@
   }
   .player-bar.active-turn .timer-display { background: var(--accent); color: white; }
 
-  /* Board sizing — fills most of the screen */
+  /* Board sizing */
   #board {
     width: min(calc(100vh - 140px), calc(100vw - 340px));
     height: min(calc(100vh - 140px), calc(100vw - 340px));
@@ -167,12 +155,6 @@
     background: rgba(0,0,0,0.75); padding: 4px 10px;
     border-radius: 6px; font-size: 0.72rem; font-weight: 600;
   }
-  .opponent-placeholder {
-    width: 100%; height: 100%;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 8px; color: var(--text-dim);
-  }
-  .opponent-placeholder .avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; }
 
   /* Bottom bar: moves + chat + controls */
   .bottom-bar {
@@ -227,6 +209,7 @@
   .chat-msg.system { align-self: center; color: var(--text-dim); font-style: italic; font-size: 0.72rem; background: none; }
   .chat-msg.their { align-self: flex-start; background: var(--surface2); }
   .chat-msg.your { align-self: flex-end; background: var(--accent); color: white; }
+  .chat-msg.ai { align-self: center; background: var(--accent); color: white; font-style: italic; }
 
   .chat-input-row {
     display: flex; gap: 6px; align-items: center;
@@ -243,9 +226,58 @@
 
   .game-controls { display: flex; gap: 6px; }
 
-  /* ══════════════════════════════════════════
-     HIGHLIGHTS (last move, check)
-     ══════════════════════════════════════════ */
+  /* AI Log Panel */
+  .ai-log-panel {
+    position: fixed;
+    right: 10px;
+    top: 60px;
+    width: 300px;
+    max-height: 400px;
+    background: rgba(15, 15, 15, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    z-index: 1000;
+  }
+  .ai-log-panel.active { display: flex; }
+  .ai-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .ai-log-header button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0 4px;
+  }
+  .ai-log-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+  .ai-log-entry {
+    margin-bottom: 4px;
+    padding: 2px 4px;
+    border-radius: 3px;
+  }
+  .ai-log-entry.white { color: #fff; background: rgba(255,255,255,0.1); }
+  .ai-log-entry.black { color: #aaa; background: rgba(0,0,0,0.3); }
+  .ai-log-entry.system { color: var(--accent); }
+
+  /* HIGHLIGHTS */
   .square-last-move {
     position: relative !important;
     background: rgba(155, 200, 50, 0.5) !important;
@@ -267,6 +299,29 @@
   #gameover p { color: var(--text-dim); font-size: 1.1rem; }
   #gameover .btn { margin-top: 10px; }
 
+  /* Mode selection in lobby */
+  .mode-select {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .mode-btn {
+    padding: 12px 24px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .mode-btn:hover { border-color: var(--accent); }
+  .mode-btn.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: white;
+  }
+
   /* Responsive */
   @media (max-width: 900px) {
     .main-row { flex-direction: column; gap: 8px; }
@@ -274,6 +329,7 @@
     .video-box { flex: 1; }
     #board { width: min(85vw, calc(100vh - 300px)); height: min(85vw, calc(100vh - 300px)); }
     .chat-input-row input { width: 120px; }
+    .ai-log-panel { width: 90%; right: 5%; top: 60px; max-height: 300px; }
   }
 
   ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -284,17 +340,18 @@
 <body>
 
 <header>
-  <div class="logo">♟ Chess<span>Roulette</span></div>
+  <div class="logo">♟ Vid<span>Chess</span></div>
   <div class="status-badge">
     <div class="status-dot"></div>
-    <span>Peer-to-Peer</span>
+    <span id="connectionStatus">P2P Ready</span>
   </div>
 </header>
 
 <!-- ═══ LOBBY ═══ -->
 <div id="lobby" class="screen active">
   <h1>Play Chess.<br><span>Meet Someone.</span></h1>
-  <p>Create a game and share the link, or paste a link to join.</p>
+  <p>Create a game and share the link, or play against AI.</p>
+  
   <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
     <button class="btn btn-primary" id="createGameBtn">⚡ Create Game</button>
     <div class="chat-input-row" style="align-items:center; gap:8px;">
@@ -302,6 +359,7 @@
       <button class="btn btn-sm" style="background:var(--surface2); color:var(--text); padding:13px 24px; border-radius:50px; font-size:0.95rem;" id="joinGameBtn">Join</button>
     </div>
   </div>
+  
   <div id="gameLinkArea" style="display:none; flex-direction:column; align-items:center; gap:10px; margin-top:10px;">
     <p style="color:var(--green); font-size:0.9rem;">✅ Game created! Share this link:</p>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -310,6 +368,13 @@
     </div>
     <p style="color:var(--text-dim); font-size:0.8rem;">Waiting for opponent to join...</p>
   </div>
+  
+  <div class="mode-select">
+    <button class="mode-btn active" id="modeHumanBtn" onclick="setGameMode('human')">👤 Human vs Human</button>
+    <button class="mode-btn" id="modeAIBtn" onclick="setGameMode('ai')">🤖 AI vs AI</button>
+    <button class="mode-btn" id="modePlayerAIBtn" onclick="setGameMode('player-ai')">🎮 Player vs AI</button>
+  </div>
+  
   <div style="display:flex; gap:24px; color:var(--text-dim); font-size:0.9rem; margin-top:10px;">
     <span>♟ Real-time Chess</span><span>📹 Video Calls</span><span>🔗 Direct Links</span>
   </div>
@@ -324,7 +389,7 @@
     <!-- Board column -->
     <div class="board-column">
       <div class="player-bar" id="opponentBar">
-        <div class="mini-avatar">🤖</div>
+        <div class="mini-avatar" id="opponentAvatar">🤖</div>
         <div><div class="name" id="opponentName">Opponent</div><div class="rating" id="opponentRating">~1500</div></div>
         <div class="timer-display" id="opponentTimer">10:00</div>
       </div>
@@ -368,10 +433,22 @@
       <div class="game-controls">
         <button class="btn btn-danger btn-sm" id="resignBtn">🏳️ Resign</button>
         <button class="btn btn-sm" style="background:var(--surface2);color:var(--text);" id="drawBtn">🤝 Draw</button>
+        <button class="btn btn-sm" style="background:var(--surface2);color:var(--text);" id="aiLogBtn" onclick="toggleAILog()">📜 AI Log</button>
       </div>
     </div>
   </div>
 
+</div>
+
+<!-- ═══ AI LOG PANEL ═══ -->
+<div class="ai-log-panel" id="aiLogPanel">
+  <div class="ai-log-header">
+    <span>📜 AI Move Log</span>
+    <button onclick="toggleAILog()">✕</button>
+  </div>
+  <div class="ai-log-content" id="aiLogContent">
+    <div class="ai-log-entry system">AI log will appear here...</div>
+  </div>
 </div>
 
 <!-- ═══ GAME OVER ═══ -->
@@ -388,17 +465,123 @@
 const game = new Chess();
 let board = null;
 let playerColor = 'w';
-let lastMove = null;         // {from, to} or null
+let lastMove = null;
 let playerTime = 600;
 let opponentTime = 600;
 let timerInterval = null;
 let gameActive = false;
+let gameMode = 'human'; // 'human', 'ai', 'player-ai'
+let aiColor = 'b'; // Player vs AI: player is white, AI is black
 
 // PeerJS multiplayer
 let peer = null;
 let conn = null;
 let localStream = null;
 let myRoomId = null;
+
+// Stockfish AI
+let stockfish = null;
+let stockfishReady = false;
+let aiThinking = false;
+
+// ═══════════════════════════════════════════
+//  Initialize Stockfish
+// ═══════════════════════════════════════════
+function initStockfish() {
+  try {
+    stockfish = new Worker('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js');
+    stockfish.onmessage = function(event) {
+      const line = event.data;
+      if (line === 'uciok') {
+        stockfishReady = true;
+        console.log('Stockfish ready');
+      }
+      if (line.startsWith('bestmove')) {
+        const move = line.split(' ')[1];
+        aiThinking = false;
+        if (gameMode === 'ai') {
+          // AI vs AI: make the move and trigger next AI move
+          makeAIMove(move);
+        } else if (gameMode === 'player-ai') {
+          // Player vs AI: AI makes its move
+          makeAIMove(move);
+        }
+      }
+    };
+    stockfish.postMessage('uci');
+  } catch(e) {
+    console.log('Stockfish not available:', e);
+  }
+}
+
+function getAIMove() {
+  if (!stockfish || !stockfishReady || aiThinking) return;
+  aiThinking = true;
+  const fen = game.fen();
+  stockfish.postMessage('position fen ' + fen);
+  stockfish.postMessage('go depth 10');
+  addAILog('system', 'AI thinking...');
+}
+
+function makeAIMove(moveSan) {
+  if (!gameActive || game.game_over()) return;
+  
+  // Convert from UCI format (e.g., "e2e4") to SAN (e.g., "e4")
+  const from = moveSan.substring(0, 2);
+  const to = moveSan.substring(2, 4);
+  const promotion = moveSan.length > 4 ? moveSan[4] : 'q';
+  
+  try {
+    const move = game.move({ from, to, promotion });
+    if (move) {
+      clearHighlights();
+      board.position(game.fen());
+      lastMove = { from, to };
+      addMoveToHistory(move);
+      highlightLastMove();
+      
+      if (gameMode === 'ai') {
+        addAILog(playerColor === 'w' ? 'white' : 'black', `AI (${playerColor === 'w' ? 'White' : 'Black'}): ${move.san}`);
+      } else if (gameMode === 'player-ai') {
+        addAILog('black', `AI (Black): ${move.san}`);
+      }
+      
+      if (game.in_check()) highlightCheck();
+      checkGameEnd();
+      
+      // If AI vs AI, trigger the other AI after a delay
+      if (gameMode === 'ai' && !game.game_over()) {
+        setTimeout(getAIMove, 1000);
+      }
+    }
+  } catch(e) {
+    console.log('AI move error:', e);
+    aiThinking = false;
+  }
+}
+
+function addAILog(side, text) {
+  const logContent = document.getElementById('aiLogContent');
+  const entry = document.createElement('div');
+  entry.className = 'ai-log-entry ' + side;
+  const timestamp = new Date().toLocaleTimeString();
+  entry.textContent = `[${timestamp}] ${text}`;
+  logContent.appendChild(entry);
+  logContent.scrollTop = logContent.scrollHeight;
+}
+
+function toggleAILog() {
+  const panel = document.getElementById('aiLogPanel');
+  panel.classList.toggle('active');
+}
+
+function setGameMode(mode) {
+  gameMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+  if (mode === 'human') document.getElementById('modeHumanBtn').classList.add('active');
+  else if (mode === 'ai') document.getElementById('modeAIBtn').classList.add('active');
+  else if (mode === 'player-ai') document.getElementById('modePlayerAIBtn').classList.add('active');
+}
 
 // ── Screens ──
 function showScreen(id) {
@@ -408,6 +591,7 @@ function showScreen(id) {
 
 // ── Check URL for room code on load ──
 window.addEventListener('load', function() {
+  initStockfish();
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
   if (room) {
@@ -428,7 +612,6 @@ document.getElementById('copyLinkBtn').addEventListener('click', async function(
   const input = document.getElementById('shareLink');
   try {
     await navigator.clipboard.writeText(input.value);
-    // Show confirmation in lobby (chat elements don't exist yet)
     const linkArea = document.getElementById('gameLinkArea');
     let confirmMsg = linkArea.querySelector('.copy-confirm');
     if (!confirmMsg) {
@@ -440,7 +623,6 @@ document.getElementById('copyLinkBtn').addEventListener('click', async function(
     confirmMsg.textContent = '✅ Link copied to clipboard!';
     setTimeout(() => { confirmMsg.textContent = ''; }, 3000);
   } catch(err) {
-    // Fallback for older browsers
     input.select();
     document.execCommand('copy');
   }
@@ -455,7 +637,6 @@ document.getElementById('playAgainBtn').addEventListener('click', function() {
 });
 
 function extractRoomCode(input) {
-  // Handle full URL or just room code
   try {
     const url = new URL(input);
     return url.searchParams.get('room');
@@ -472,8 +653,13 @@ function generateRoomId() {
 }
 
 function createGame() {
+  if (gameMode === 'ai') {
+    // AI vs AI mode - no PeerJS needed
+    startAIGame();
+    return;
+  }
+  
   myRoomId = generateRoomId();
-  // Use PeerJS with custom config for better reliability
   peer = new Peer('cr-' + myRoomId, {
     debug: 2,
     config: {
@@ -489,7 +675,6 @@ function createGame() {
     document.getElementById('gameLinkArea').style.display = 'flex';
     const link = window.location.origin + window.location.pathname + '?room=' + myRoomId;
     document.getElementById('shareLink').value = link;
-    // Show waiting message
     addChatMessage('system', 'Waiting for opponent to join...');
   });
 
@@ -508,15 +693,19 @@ function createGame() {
     console.log('Peer connection closed');
   });
 
-  // Register incoming call handler early so we never miss a video call
+  // Register incoming call handler early - FIXED: now plays remote video
   peer.on('call', function(incomingCall) {
+    console.log('Host received incoming video call');
     if (localStream) {
       incomingCall.answer(localStream);
       incomingCall.on('stream', function(remoteStream) {
-        document.getElementById('remoteVideo').srcObject = remoteStream;
+        console.log('Host received remote video stream');
+        const remoteVideo = document.getElementById('remoteVideo');
+        remoteVideo.srcObject = remoteStream;
+        // CRITICAL FIX: Explicitly play the remote video
+        remoteVideo.play().catch(e => console.log('Remote video play error:', e));
       });
     } else {
-      // Camera not ready yet — answer with audio-only or reject
       incomingCall.answer();
     }
   });
@@ -531,8 +720,44 @@ function createGame() {
   });
 }
 
+function startAIGame() {
+  game.reset();
+  playerTime = 600;
+  opponentTime = 600;
+  gameActive = true;
+  lastMove = null;
+  playerColor = 'w'; // White AI goes first
+  
+  showScreen('game');
+  updateTimers();
+  startTimer();
+  
+  document.getElementById('chatMessages').innerHTML = '';
+  document.getElementById('moveStrip').innerHTML = '<span style="color:var(--text-dim);font-size:0.75rem;">AI vs AI - Watch the battle!</span>';
+  document.getElementById('opponentName').textContent = 'AI (Black)';
+  document.getElementById('opponentAvatar').textContent = '🤖';
+  document.getElementById('playerBar').querySelector('.name').textContent = 'AI (White)';
+  document.getElementById('playerBar').querySelector('.mini-avatar').textContent = '🤖';
+  
+  // Hide video panel in AI mode
+  document.querySelector('.video-panel').style.display = 'none';
+  
+  var config = {
+    draggable: false, // No dragging in AI mode
+    position: 'start',
+    orientation: 'w',
+    pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+  };
+  if (board) board.destroy();
+  board = Chessboard('board', config);
+  
+  addAILog('system', 'AI vs AI game started!');
+  
+  // White AI moves first
+  setTimeout(getAIMove, 500);
+}
+
 function joinGame(room) {
-  // Use PeerJS with custom config for better reliability
   peer = new Peer({
     debug: 2,
     config: {
@@ -548,19 +773,17 @@ function joinGame(room) {
     attemptConnection(room);
   });
 
+  // FIXED: Register call handler early and explicitly play remote video
   peer.on('call', function(incomingCall) {
-    console.log('Received incoming video call');
+    console.log('Joiner received incoming video call');
     if (localStream) {
       incomingCall.answer(localStream);
       incomingCall.on('stream', function(remoteStream) {
-        console.log('Received remote video stream');
-        var remoteVideo = document.getElementById('remoteVideo');
+        console.log('Joiner received remote video stream');
+        const remoteVideo = document.getElementById('remoteVideo');
         remoteVideo.srcObject = remoteStream;
-        // Explicitly play the remote video
+        // CRITICAL FIX: Explicitly play the remote video
         remoteVideo.play().catch(e => console.log('Remote video play error:', e));
-      });
-      incomingCall.on('close', function() {
-        console.log('Video call closed');
       });
     } else {
       console.log('No local stream, answering without video');
@@ -594,25 +817,20 @@ var connectionTimeout = null;
 function attemptConnection(room) {
   if (connectionRetries >= maxRetries) {
     alert('Could not connect after ' + maxRetries + ' attempts. Make sure the host is still on the game page and try a new room.');
-    document.getElementById('joinBtn').disabled = false;
-    document.getElementById('joinBtn').textContent = 'Join Game';
     return;
   }
 
   connectionRetries++;
   console.log('Connection attempt ' + connectionRetries + ' of ' + maxRetries);
 
-  // Clear any existing timeout
   if (connectionTimeout) clearTimeout(connectionTimeout);
 
-  // Try to connect
   conn = peer.connect('cr-' + room, { 
     reliable: true,
     metadata: { joiner: true }
   });
   playerColor = 'b';
 
-  // Set timeout for connection
   connectionTimeout = setTimeout(function() {
     if (!conn.open) {
       console.log('Connection timeout, retrying...');
@@ -645,7 +863,6 @@ function attemptConnection(room) {
 function setupConnection() {
   conn.on('open', function() {
     console.log('Connected!');
-    // Both host and joiner start the game when connection is open
     startGame();
   });
 
@@ -658,7 +875,6 @@ function setupConnection() {
     if (gameActive) endGame('Disconnected', 'Opponent disconnected.');
   });
 
-  // Start camera, then set up video call
   startCamera().then(function() {
     setupVideoCall();
   });
@@ -687,8 +903,6 @@ function handleIncomingData(data) {
   }
 }
 
-// ── Remove old matchmaking ──
-
 // ═══════════════════════════════════════════
 //  Start Game
 // ═══════════════════════════════════════════
@@ -707,11 +921,11 @@ function startGame() {
   addChatMessage('system', 'Game started! Good luck! 🍀');
   document.getElementById('moveStrip').innerHTML = '<span style="color:var(--text-dim);font-size:0.75rem;">Moves will appear here...</span>';
 
-  // Set board orientation based on player color
+  // Set board orientation based on player color - FIXED for both sides
   var config = {
     draggable: true,
     position: 'start',
-    orientation: playerColor,
+    orientation: playerColor, // White sees white on bottom, Black sees black on bottom
     onDragStart: onDragStart,
     onDrop: onDrop,
     onSnapEnd: onSnapEnd,
@@ -719,6 +933,13 @@ function startGame() {
   };
   if (board) board.destroy();
   board = Chessboard('board', config);
+  
+  // Update opponent info based on mode
+  if (gameMode === 'player-ai') {
+    document.getElementById('opponentName').textContent = 'Stockfish AI';
+    document.getElementById('opponentAvatar').textContent = '🤖';
+    document.getElementById('opponentRating').textContent = '~2800';
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -726,7 +947,6 @@ function startGame() {
 // ═══════════════════════════════════════════
 function onDragStart(source, piece, position, orientation) {
   if (!gameActive || game.game_over()) return false;
-  // Only allow dragging when it's this player's turn
   if (game.turn() !== playerColor) return false;
   if ((game.turn()==='w' && piece.search(/^b/)!==-1) || (game.turn()==='b' && piece.search(/^w/)!==-1)) return false;
 }
@@ -735,7 +955,6 @@ function onDrop(source, target) {
   const move = game.move({ from: source, to: target, promotion: 'q' });
   if (move === null) return 'snapback';
 
-  // Clear previous highlights first
   clearHighlights();
   
   board.position(game.fen());
@@ -744,9 +963,13 @@ function onDrop(source, target) {
   highlightLastMove();
   checkGameEnd();
 
-  // Send move to opponent
   if (conn && conn.open) {
     conn.send({ type: 'move', move: move.san });
+  }
+  
+  // If player vs AI and player is white, trigger AI response
+  if (gameMode === 'player-ai' && playerColor === 'w' && !game.game_over()) {
+    setTimeout(getAIMove, 500);
   }
 }
 
@@ -770,10 +993,7 @@ function highlightLastMove() {
 }
 
 function highlightCheck() {
-  // Find king in check
   const turn = game.turn();
-  const fen = game.fen();
-  // Find king position
   for (var file = 0; file < 8; file++) {
     for (var rank = 0; rank < 8; rank++) {
       var sq = String.fromCharCode(97+file) + (8-rank);
@@ -787,7 +1007,7 @@ function highlightCheck() {
 }
 
 // ═══════════════════════════════════════════
-//  Opponent Move (received via PeerJS)
+//  Opponent Move
 // ═══════════════════════════════════════════
 function handleOpponentMove(san) {
   if (!gameActive || game.game_over()) return;
@@ -824,7 +1044,6 @@ function endGame(title, reason) {
   document.getElementById('gameover').classList.add('active');
 }
 
-// ── Resign / Draw ──
 document.getElementById('resignBtn').addEventListener('click', function() {
   if (gameActive) {
     if (conn && conn.open) conn.send({ type: 'resign' });
@@ -835,14 +1054,13 @@ document.getElementById('drawBtn').addEventListener('click', function() {
   if (gameActive && conn && conn.open) {
     conn.send({ type: 'draw-offer' });
     addChatMessage('system', 'Draw offered. Waiting for opponent...');
-    // Disable draw button to prevent double offers
     document.getElementById('drawBtn').disabled = true;
     setTimeout(() => { document.getElementById('drawBtn').disabled = false; }, 10000);
   }
 });
 
 function showDrawOfferUI() {
-  hideDrawOfferUI(); // Remove any existing UI
+  hideDrawOfferUI();
   var chatPreview = document.getElementById('chatMessages');
   var drawRow = document.createElement('div');
   drawRow.id = 'drawOfferRow';
@@ -920,7 +1138,6 @@ function addMoveToHistory(move) {
   var history = game.history();
   var total = history.length;
 
-  // Rebuild the strip (simple approach)
   strip.innerHTML = '';
   for (var i = 0; i < total; i++) {
     var h = game.history({verbose:true});
@@ -971,22 +1188,21 @@ function sendChat() {
 }
 
 // ═══════════════════════════════════════════
-//  Camera + Video
+//  Camera + Video - FIXED
 // ═══════════════════════════════════════════
 async function startCamera() {
-  var localVideo = document.getElementById('localVideo');
+  const localVideo = document.getElementById('localVideo');
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ 
       video: { width: 640, height: 480, facingMode: 'user' }, 
       audio: true 
     });
     localVideo.srcObject = localStream;
-    // Explicitly play the video (required for some browsers)
-    await localVideo.play().catch(e => console.log('Video play error:', e));
+    // CRITICAL FIX: Explicitly play the local video
+    await localVideo.play().catch(e => console.log('Local video play error:', e));
     console.log('Camera started successfully');
   } catch(err) {
     console.log('Camera not available:', err.message);
-    // Only show chat message if game screen is visible
     if (document.getElementById('chatMessages')) {
       addChatMessage('system', 'Camera not available — video is optional');
     }
@@ -997,13 +1213,13 @@ function setupVideoCall() {
   // Host (white) initiates the video call
   if (playerColor === 'w' && conn && conn.open && peer && localStream) {
     console.log('Host initiating video call...');
-    var call = peer.call(conn.peer, localStream);
+    const call = peer.call(conn.peer, localStream);
     if (call) {
       call.on('stream', function(remoteStream) {
         console.log('Host received remote video stream');
-        var remoteVideo = document.getElementById('remoteVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
         remoteVideo.srcObject = remoteStream;
-        // Explicitly play the remote video
+        // CRITICAL FIX: Explicitly play the remote video
         remoteVideo.play().catch(e => console.log('Remote video play error:', e));
       });
       call.on('close', function() {
