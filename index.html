@@ -485,6 +485,109 @@ let stockfishReady = false;
 let aiThinking = false;
 
 // ═══════════════════════════════════════════
+//  TEST HARNESS - for automated testing
+// ═══════════════════════════════════════════
+(function() {
+  // Only expose test harness in development/testing
+  const isTestMode = window.location.search.includes('test=1') || window.location.hostname === 'localhost';
+  if (!isTestMode) return;
+  
+  window.__TEST_API__ = {
+    _meta: { 
+      name: "VidChess", 
+      framework: "vanilla", 
+      stateLib: "none", 
+      createdBy: "fabric-agent",
+      version: "1.0.0"
+    },
+    actions: {
+      setGameMode: (mode) => {
+        setGameMode(mode);
+        return { success: true, mode };
+      },
+      createGame: () => {
+        if (gameMode === 'ai') {
+          startAIGame();
+          return { success: true, mode: 'ai' };
+        }
+        // For human mode, just initialize without PeerJS for testing
+        startGame();
+        return { success: true, mode: gameMode };
+      },
+      makeMove: (from, to, promotion = 'q') => {
+        if (!gameActive) return { success: false, error: 'Game not active' };
+        const move = game.move({ from, to, promotion });
+        if (!move) return { success: false, error: 'Invalid move' };
+        board.position(game.fen());
+        lastMove = { from, to };
+        addMoveToHistory(move);
+        highlightLastMove();
+        if (game.in_check()) highlightCheck();
+        checkGameEnd();
+        return { success: true, move: move.san, fen: game.fen() };
+      },
+      makeAIMove: () => {
+        if (!gameActive || aiThinking) return { success: false, error: 'AI not ready' };
+        getAIMove();
+        return { success: true, message: 'AI thinking...' };
+      },
+      resetGame: () => {
+        game.reset();
+        gameActive = false;
+        playerTime = 600;
+        opponentTime = 600;
+        lastMove = null;
+        if (board) board.position('start');
+        clearInterval(timerInterval);
+        return { success: true };
+      },
+      toggleAILog: () => {
+        toggleAILog();
+        return { success: true };
+      }
+    },
+    queries: {
+      getGameMode: () => gameMode,
+      getFEN: () => game.fen(),
+      getPGN: () => game.pgn(),
+      getHistory: () => game.history(),
+      isGameActive: () => gameActive,
+      isGameOver: () => game.game_over(),
+      getTurn: () => game.turn(),
+      getPlayerColor: () => playerColor,
+      getMoveCount: () => game.history().length,
+      inCheck: () => game.in_check(),
+      inCheckmate: () => game.in_checkmate(),
+      inStalemate: () => game.in_stalemate(),
+      inDraw: () => game.in_draw(),
+      getPiece: (square) => game.get(square),
+      getValidMoves: (square) => game.moves({ square, verbose: true }),
+      isStockfishReady: () => stockfishReady,
+      isAIThinking: () => aiThinking,
+      getBoardOrientation: () => board ? board.orientation() : null,
+      getVideoPanelVisible: () => {
+        const panel = document.querySelector('.video-panel');
+        return panel && panel.style.display !== 'none';
+      },
+      getAILogVisible: () => {
+        const panel = document.getElementById('aiLogPanel');
+        return panel && panel.classList.contains('active');
+      },
+      getMoveStripContent: () => {
+        const strip = document.getElementById('moveStrip');
+        return strip ? strip.textContent.trim() : '';
+      },
+      getAILogEntries: () => {
+        const entries = document.querySelectorAll('#aiLogContent .ai-log-entry');
+        return Array.from(entries).map(e => e.textContent.trim());
+      }
+    }
+  };
+  
+  console.log('[TEST HARNESS] VidChess test API loaded. Use window.__TEST_API__');
+})();
+
+// ═══════════════════════════════════════════
 //  Initialize Stockfish
 // ═══════════════════════════════════════════
 function initStockfish() {
