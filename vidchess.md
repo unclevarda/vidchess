@@ -3,6 +3,30 @@
 **Live URL:** https://unclevarda.github.io/vidchess/  
 **GitHub:** https://github.com/unclevarda/vidchess  
 **Concept:** Lichess × Chatroulette - Random chess matchmaking with video chat
+**Latest:** AI vs AI, Player vs AI, Shared AI Log
+
+---
+
+## ✅ COMPLETED FIXES (2026-04-27) - AI ENHANCED
+
+### 5. AI Integration (MAJOR)
+- **AI vs AI Mode:** Watch two Stockfish engines battle
+- **Player vs AI Mode:** Play against Stockfish as White
+- **AI Log Panel:** Real-time move log with timestamps
+- **Stockfish.js:** Depth 10, ~2000-2200 Elo strength
+- **Auto-responses:** AI moves automatically after player
+
+### 6. Video Playback (FIXED)
+- Added explicit `.play()` calls for ALL video elements
+- Host remote video now plays correctly
+- Joiner remote video now plays correctly
+- Local video plays on camera start
+- Better error logging
+
+### 7. Board Orientation (FIXED)
+- White player: White pieces on bottom
+- Black player: Black pieces on bottom
+- Each player sees from their perspective
 
 ---
 
@@ -118,6 +142,10 @@ onDrop() → game.move() → clearHighlights() → highlightLastMove()
 5. **Video Quality** - Limited to 640x480 for bandwidth
 
 ### Potential Enhancements
+- [ ] Adjustable AI strength (depth 1-20)
+- [ ] AI commentary/analysis
+- [ ] Multiple AI engines (Stockfish, Maia, etc.)
+- [ ] AI vs AI speed control
 - [ ] Reconnection UI button
 - [ ] Connection status indicator
 - [ ] Move sound effects
